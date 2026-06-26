@@ -234,3 +234,7 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log("🚀 Animal Detox running on port", PORT);
 });
+"engines": {
+  "node": "18.x"
+}
+"dev": "nodemon server.js"

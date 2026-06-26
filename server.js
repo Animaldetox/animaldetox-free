@@ -189,26 +189,27 @@ app.post("/webhook", express.raw({ type: "application/json" }), async (req, res)
 
     console.log("📩 Stripe event:", event.type);
 
-    // paiement réussi
     if (event.type === "checkout.session.completed") {
-
       const session = event.data.object;
 
       const email = session.customer_details?.email;
 
-      console.log("💰 Paiement reçu pour:", email);
+      if (!email) {
+        console.log("❌ No email found");
+        return res.sendStatus(200);
+      }
 
-      if (email) {
-        const { error } = await supabase
-          .from("users")
-          .update({ is_pro: true })
-          .eq("email", email);
+      console.log("💰 Paiement OK pour:", email);
 
-        if (error) {
-          console.log("❌ Supabase error:", error.message);
-        } else {
-          console.log("✅ USER PASSED TO PRO");
-        }
+      const { error } = await supabase
+        .from("users")
+        .update({ is_pro: true })
+        .eq("email", email);
+
+      if (error) {
+        console.log("❌ Supabase error:", error.message);
+      } else {
+        console.log("✅ USER PASSED TO PRO");
       }
     }
 

@@ -10,12 +10,8 @@
     "@google/genai": "^1.14.0",
     "express": "^4.19.2",
     "cors": "^2.8.5",
-    "multer": "1.4.4"
+    "multer": "1.4.4",
+    "stripe": "^16.0.0"
   },
   "license": "MIT"
-  "@google/genai": "^1.14.0",
-  "express": "^4.19.2",
-  "cors": "^2.8.5",
-  "multer": "1.4.4",
-  "stripe": "^16.0.0"
 }

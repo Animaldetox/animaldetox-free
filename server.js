@@ -183,3 +183,39 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log("🚀 Animal Detox running on port", PORT);
 });
+app.post("/webhook", express.raw({ type: "application/json" }), async (req, res) => {
+  try {
+    const event = JSON.parse(req.body);
+
+    console.log("📩 Stripe event:", event.type);
+
+    // paiement réussi
+    if (event.type === "checkout.session.completed") {
+
+      const session = event.data.object;
+
+      const email = session.customer_details?.email;
+
+      console.log("💰 Paiement reçu pour:", email);
+
+      if (email) {
+        const { error } = await supabase
+          .from("users")
+          .update({ is_pro: true })
+          .eq("email", email);
+
+        if (error) {
+          console.log("❌ Supabase error:", error.message);
+        } else {
+          console.log("✅ USER PASSED TO PRO");
+        }
+      }
+    }
+
+    res.sendStatus(200);
+
+  } catch (err) {
+    console.error("Webhook error:", err);
+    res.sendStatus(500);
+  }
+});

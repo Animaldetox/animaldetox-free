@@ -1,33 +1,14 @@
-const express = require("express");
-const cors = require("cors");
-const multer = require("multer");
-const fs = require("fs");
-const { GoogleGenAI } = require("@google/genai");
-
-const app = express();
-
-app.use(cors());
-
-const upload = multer({ dest: "uploads/" });
-
-const ai = new GoogleGenAI({
-  apiKey: process.env.GEMINI_API_KEY,
-});
-
-app.get("/", (req, res) => {
-  res.send("Animal Detox Gemini OK");
-});
-
 app.post("/analyze", upload.single("image"), async (req, res) => {
   try {
+
     if (!req.file) {
       return res.status(400).json({
-        error: "Aucune image reçue",
+        error: "No image"
       });
     }
 
     const imageBase64 = fs.readFileSync(req.file.path, {
-      encoding: "base64",
+      encoding: "base64"
     });
 
     const response = await ai.models.generateContent({
@@ -36,32 +17,55 @@ app.post("/analyze", upload.single("image"), async (req, res) => {
         {
           inlineData: {
             mimeType: req.file.mimetype,
-            data: imageBase64,
-          },
+            data: imageBase64
+          }
         },
         {
-          text:
-            "Décris précisément ce que tu vois sur cette image. Réponds en français.",
-        },
-      ],
+          text: `
+Tu es un assistant vétérinaire.
+
+Analyse cette image et réponds UNIQUEMENT en JSON valide :
+
+{
+"object": "nom de l'objet détecté",
+"risk": "LOW | MEDIUM | HIGH | CRITICAL",
+"explanation": "explication simple pour un propriétaire de chien ou chat",
+"action": "conseil clair"
+}
+
+Règles :
+- Si toxique pour chien/chat → HIGH ou CRITICAL
+- Sinon → LOW
+- Réponse uniquement JSON, sans texte autour
+`
+        }
+      ]
     });
 
     fs.unlinkSync(req.file.path);
 
-    res.json({
-      result: response.text,
-    });
+    let text = response.text;
+
+    let json;
+
+    try {
+      json = JSON.parse(text);
+    } catch (e) {
+      json = {
+        object: "unknown",
+        risk: "UNKNOWN",
+        explanation: text,
+        action: "format error"
+      };
+    }
+
+    res.json(json);
+
   } catch (err) {
-    console.error(err);
+    console.log(err);
 
     res.status(500).json({
-      error: err.message,
+      error: err.message
     });
   }
-});
-
-const PORT = process.env.PORT || 3000;
-
-app.listen(PORT, () => {
-  console.log("Serveur démarré sur le port", PORT);
 });

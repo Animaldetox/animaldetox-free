@@ -9,19 +9,20 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+// 📁 upload config
 const upload = multer({ dest: "uploads/" });
 
-// 🔐 Gemini setup
+// 🔐 Gemini
 const ai = new GoogleGenAI({
   apiKey: process.env.GEMINI_API_KEY,
 });
 
-// 🟢 Test serveur
+// 🟢 TEST SERVER
 app.get("/", (req, res) => {
   res.send("🐾 Animal Detox Gemini OK");
 });
 
-// 🧪 Test API simple
+// 🧪 TEST API
 app.get("/test", (req, res) => {
   res.json({ ok: true });
 });
@@ -34,17 +35,17 @@ app.post("/analyze", upload.single("image"), async (req, res) => {
       return res.status(400).json({
         object: "no_file",
         risk: "UNKNOWN",
-        explanation: "Aucune image reçue",
+        explanation: "Aucune image envoyée",
         action: "Envoyer une image"
       });
     }
 
-    // 📸 image en base64
+    // 📸 image base64
     const imageBase64 = fs.readFileSync(req.file.path, {
       encoding: "base64"
     });
 
-    // 🧠 appel Gemini
+    // 🧠 GEMINI CALL
     const response = await ai.models.generateContent({
       model: "gemini-2.5-flash",
       contents: [
@@ -58,7 +59,11 @@ app.post("/analyze", upload.single("image"), async (req, res) => {
           text: `
 Tu es un vétérinaire expert.
 
-Analyse cette image et réponds UNIQUEMENT en JSON valide :
+Analyse cette image et réponds UNIQUEMENT en JSON valide.
+
+Ne mets aucun texte, aucun markdown, aucun \`\`\`.
+
+Format obligatoire :
 
 {
   "object": "nom de l'objet",
@@ -68,9 +73,9 @@ Analyse cette image et réponds UNIQUEMENT en JSON valide :
 }
 
 Règles :
-- Si toxique pour chien/chat → HIGH ou CRITICAL
+- Si dangereux pour animal → HIGH ou CRITICAL
 - Sinon → LOW
-- Répond uniquement en JSON sans texte autour
+- Réponse STRICTEMENT JSON
 `
         }
       ]
@@ -79,6 +84,12 @@ Règles :
     fs.unlinkSync(req.file.path);
 
     let text = response.text;
+
+    // 🧹 CLEAN RESPONSE GEMINI (IMPORTANT)
+    text = text
+      .replace(/```json/g, "")
+      .replace(/```/g, "")
+      .trim();
 
     let json;
 
@@ -111,5 +122,5 @@ Règles :
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
-  console.log("🚀 Server running on port", PORT);
+  console.log("🚀 Animal Detox running on port", PORT);
 });

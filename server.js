@@ -2,29 +2,22 @@ const express = require("express");
 const cors = require("cors");
 const multer = require("multer");
 const fs = require("fs");
+const fetch = require("node-fetch");
 const Stripe = require("stripe");
-const { GoogleGenAI } = require("@google/genai");
 const { createClient } = require("@supabase/supabase-js");
 
 // ======================
-// APP INIT
+// INIT APP
 // ======================
 const app = express();
 
 app.use(cors());
 app.use(express.json());
 
-// ⚠️ IMPORTANT: Stripe webhook needs raw body (future upgrade)
-app.use(express.urlencoded({ extended: true }));
-
 // ======================
-// SERVICES INIT
+// INIT SERVICES
 // ======================
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
-
-const ai = new GoogleGenAI({
-  apiKey: process.env.GEMINI_API_KEY,
-});
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -37,7 +30,7 @@ const supabase = createClient(
 const upload = multer({ dest: "uploads/" });
 
 // ======================
-// TEST
+// ROUTES TEST
 // ======================
 app.get("/", (req, res) => {
   res.send("🐾 Animal Detox OK");
@@ -57,119 +50,129 @@ app.post("/create-checkout-session", async (req, res) => {
           quantity: 1,
         },
       ],
-      success_url: "https://animaldetox.eu/success?email=test",
+      success_url: "https://animaldetox.eu/success",
       cancel_url: "https://animaldetox.eu/cancel",
     });
 
     res.json({ url: session.url });
-
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
 // ======================
-// GEMINI ANALYSIS
+// GEMINI (API HTTP STABLE)
 // ======================
-app.post("/analyze", upload.single("image"), async (req, res) => {
-  try {
+const GEMINI_URL =
+  "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent";
 
-    if (!req.file) {
-      return res.status(400).json({
-        object: "no_file",
-        risk: "UNKNOWN",
-        explanation: "Aucune image envoyée",
-        action: "Envoyer une image"
-      });
-    }
-
-    const imageBase64 = fs.readFileSync(req.file.path, {
-      encoding: "base64"
-    });
-
-    const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
+async function callGemini(imageBase64, mimeType) {
+  const response = await fetch(GEMINI_URL + "?key=" + process.env.GEMINI_API_KEY, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
       contents: [
         {
-          inlineData: {
-            mimeType: req.file.mimetype,
-            data: imageBase64
-          }
-        },
-        {
-          text: `
-Analyse cette image pour animaux.
+          parts: [
+            {
+              inline_data: {
+                mime_type: mimeType,
+                data: imageBase64,
+              },
+            },
+            {
+              text: `Analyse cette image pour animaux.
 
 Retourne UNIQUEMENT du JSON valide :
 
 {
   "object": "nom",
-  "risk": "LOW | MEDIUM | HIGH | CRITICAL",
-  "explanation": "...",
-  "action": "..."
+  "risk": "LOW|MEDIUM|HIGH|CRITICAL",
+  "explanation": "texte simple",
+  "action": "conseil"
+}`
+            }
+          ],
+        },
+      ],
+    }),
+  });
+
+  const data = await response.json();
+
+  return (
+    data.candidates?.[0]?.content?.parts?.[0]?.text || ""
+  );
 }
-`
-        }
-      ]
+
+// ======================
+// ANALYZE ROUTE
+// ======================
+app.post("/analyze", upload.single("image"), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({
+        object: "no_file",
+        risk: "UNKNOWN",
+        explanation: "Aucune image envoyée",
+        action: "Envoyer une image",
+      });
+    }
+
+    const imageBase64 = fs.readFileSync(req.file.path, {
+      encoding: "base64",
     });
+
+    const text = await callGemini(imageBase64, req.file.mimetype);
 
     fs.unlinkSync(req.file.path);
 
-    let text = response.text || "";
-
-    text = text
+    let clean = text
       .replace(/```json/g, "")
       .replace(/```/g, "")
       .trim();
 
     try {
-      return res.json(JSON.parse(text));
+      return res.json(JSON.parse(clean));
     } catch (e) {
       return res.json({
         object: "unknown",
         risk: "UNKNOWN",
-        explanation: text,
-        action: "format error"
+        explanation: clean,
+        action: "format error",
       });
     }
-
   } catch (err) {
-    return res.status(500).json({
+    console.error(err);
+    res.status(500).json({
       object: "server_error",
       risk: "UNKNOWN",
       explanation: err.message,
-      action: "check logs"
+      action: "check logs",
     });
   }
 });
 
 // ======================
-// SUPABASE FUNCTIONS (CORRECT)
+// SUPABASE HELPERS
 // ======================
-
-// créer user (UTILISABLE dans routes)
 async function createUser(email) {
-  const { data, error } = await supabase
-    .from("users")
-    .insert([
-      {
-        email: email,
-        is_pro: false,
-        scans: 0
-      }
-    ]);
-
-  return { data, error };
+  return await supabase.from("users").insert([
+    {
+      email,
+      is_pro: false,
+      scans: 0,
+    },
+  ]);
 }
 
-// upgrade user (UTILISABLE)
 async function upgradeUser(email) {
-  const { data, error } = await supabase
+  return await supabase
     .from("users")
     .update({ is_pro: true })
     .eq("email", email);
-
-  return { data, error };
 }
 
 // ======================

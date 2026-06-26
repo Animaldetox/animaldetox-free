@@ -11,8 +11,8 @@ app.post("/create-checkout-session", async (req, res) => {
           quantity: 1
         }
       ],
-      success_url: "https://ton-site.com/success",
-      cancel_url: "https://ton-site.com/cancel"
+      success_url: "https://animaldetox.eu/success",
+      cancel_url: "https://animaldetox.eu/cancel"
     });
 
     res.json({ url: session.url });

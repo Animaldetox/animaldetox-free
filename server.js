@@ -11,11 +11,20 @@ const { createClient } = require("@supabase/supabase-js");
 // ======================
 const app = express();
 
-app.use(cors());
+// ⚠️ Stripe webhook doit avoir raw body
+app.use("/webhook", express.raw({ type: "application/json" }));
+
+app.use(cors({
+  origin: [
+    "https://animaldetox.eu",
+    "http://localhost:3000"
+  ]
+}));
+
 app.use(express.json());
 
 // ======================
-// INIT SERVICES
+// SERVICES
 // ======================
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 
@@ -25,19 +34,28 @@ const supabase = createClient(
 );
 
 // ======================
-// UPLOAD
+// MULTER SECURITY FIX
 // ======================
-const upload = multer({ dest: "uploads/" });
-
-// ======================
-// ROUTES TEST
-// ======================
-app.get("/", (req, res) => {
-  res.send("🐾 Animal Detox OK");
+const upload = multer({
+  dest: "uploads/",
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB max
+  fileFilter: (req, file, cb) => {
+    if (!file.mimetype.startsWith("image/")) {
+      return cb(new Error("Only images allowed"));
+    }
+    cb(null, true);
+  }
 });
 
 // ======================
-// STRIPE CHECKOUT
+// HEALTH CHECK
+// ======================
+app.get("/", (req, res) => {
+  res.json({ status: "ok", app: "Animal Detox" });
+});
+
+// ======================
+// STRIPE CHECKOUT (FIXED)
 // ======================
 app.post("/create-checkout-session", async (req, res) => {
   try {
@@ -50,18 +68,19 @@ app.post("/create-checkout-session", async (req, res) => {
           quantity: 1,
         },
       ],
-      success_url: "https://animaldetox.eu/success",
+      success_url: "https://animaldetox.eu/success?session_id={CHECKOUT_SESSION_ID}",
       cancel_url: "https://animaldetox.eu/cancel",
     });
 
     res.json({ url: session.url });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error("Stripe error:", err);
+    res.status(500).json({ error: "Stripe session failed" });
   }
 });
 
 // ======================
-// GEMINI (API HTTP STABLE)
+// GEMINI CALL
 // ======================
 const GEMINI_URL =
   "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent";
@@ -69,9 +88,7 @@ const GEMINI_URL =
 async function callGemini(imageBase64, mimeType) {
   const response = await fetch(GEMINI_URL + "?key=" + process.env.GEMINI_API_KEY, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       contents: [
         {
@@ -85,8 +102,7 @@ async function callGemini(imageBase64, mimeType) {
             {
               text: `Analyse cette image pour animaux.
 
-Retourne UNIQUEMENT du JSON valide :
-
+Retourne UNIQUEMENT du JSON valide:
 {
   "object": "nom",
   "risk": "LOW|MEDIUM|HIGH|CRITICAL",
@@ -94,23 +110,23 @@ Retourne UNIQUEMENT du JSON valide :
   "action": "conseil"
 }`
             }
-          ],
-        },
-      ],
-    }),
+          ]
+        }
+      ]
+    })
   });
 
   const data = await response.json();
 
-  return (
-    data.candidates?.[0]?.content?.parts?.[0]?.text || ""
-  );
+  return data?.candidates?.[0]?.content?.parts?.[0]?.text || null;
 }
 
 // ======================
-// ANALYZE ROUTE
+// ANALYZE ROUTE (FIXED + SAFE)
 // ======================
 app.post("/analyze", upload.single("image"), async (req, res) => {
+  let filePath = null;
+
   try {
     if (!req.file) {
       return res.status(400).json({
@@ -121,13 +137,22 @@ app.post("/analyze", upload.single("image"), async (req, res) => {
       });
     }
 
-    const imageBase64 = fs.readFileSync(req.file.path, {
+    filePath = req.file.path;
+
+    const imageBase64 = fs.readFileSync(filePath, {
       encoding: "base64",
     });
 
     const text = await callGemini(imageBase64, req.file.mimetype);
 
-    fs.unlinkSync(req.file.path);
+    if (!text) {
+      return res.status(500).json({
+        object: "error",
+        risk: "UNKNOWN",
+        explanation: "No AI response",
+        action: "retry",
+      });
+    }
 
     let clean = text
       .replace(/```json/g, "")
@@ -135,7 +160,8 @@ app.post("/analyze", upload.single("image"), async (req, res) => {
       .trim();
 
     try {
-      return res.json(JSON.parse(clean));
+      const parsed = JSON.parse(clean);
+      return res.json(parsed);
     } catch (e) {
       return res.json({
         object: "unknown",
@@ -144,30 +170,27 @@ app.post("/analyze", upload.single("image"), async (req, res) => {
         action: "format error",
       });
     }
+
   } catch (err) {
-    console.error(err);
-    res.status(500).json({
+    console.error("Analyze error:", err);
+
+    return res.status(500).json({
       object: "server_error",
       risk: "UNKNOWN",
-      explanation: err.message,
+      explanation: "Internal error",
       action: "check logs",
     });
+
+  } finally {
+    if (filePath && fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+    }
   }
 });
 
 // ======================
-// SUPABASE HELPERS
+// SUPABASE (FIXED SAFETY)
 // ======================
-async function createUser(email) {
-  return await supabase.from("users").insert([
-    {
-      email,
-      is_pro: false,
-      scans: 0,
-    },
-  ]);
-}
-
 async function upgradeUser(email) {
   return await supabase
     .from("users")
@@ -176,16 +199,11 @@ async function upgradeUser(email) {
 }
 
 // ======================
-// START SERVER
+// STRIPE WEBHOOK (CRITICAL FIX)
 // ======================
-const PORT = process.env.PORT || 3000;
-
-app.listen(PORT, () => {
-  console.log("🚀 Animal Detox running on port", PORT);
-});
-app.post("/webhook", express.raw({ type: "application/json" }), async (req, res) => {
+app.post("/webhook", async (req, res) => {
   try {
-    const event = JSON.parse(req.body);
+    const event = JSON.parse(req.body.toString());
 
     console.log("📩 Stripe event:", event.type);
 
@@ -194,22 +212,9 @@ app.post("/webhook", express.raw({ type: "application/json" }), async (req, res)
 
       const email = session.customer_details?.email;
 
-      if (!email) {
-        console.log("❌ No email found");
-        return res.sendStatus(200);
-      }
-
-      console.log("💰 Paiement OK pour:", email);
-
-      const { error } = await supabase
-        .from("users")
-        .update({ is_pro: true })
-        .eq("email", email);
-
-      if (error) {
-        console.log("❌ Supabase error:", error.message);
-      } else {
-        console.log("✅ USER PASSED TO PRO");
+      if (email) {
+        await upgradeUser(email);
+        console.log("✅ USER upgraded to PRO:", email);
       }
     }
 
@@ -219,4 +224,13 @@ app.post("/webhook", express.raw({ type: "application/json" }), async (req, res)
     console.error("Webhook error:", err);
     res.sendStatus(500);
   }
+});
+
+// ======================
+// START SERVER
+// ======================
+const PORT = process.env.PORT || 3000;
+
+app.listen(PORT, () => {
+  console.log("🚀 Animal Detox running on port", PORT);
 });

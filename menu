@@ -1,0 +1,9 @@
+animaldetox-free/
+│
+├── server.js
+├── package.json
+├── toxins.json
+├── public/
+│   ├── index.html
+│   ├── style.css
+│   └── script.js

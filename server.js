@@ -161,3 +161,20 @@ const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_KEY
 );
+async function createUser(email) {
+  const { data, error } = await supabase
+    .from("users")
+    .insert([
+      {
+        email: email,
+        is_pro: false,
+        scans: 0
+      }
+    ]);
+
+  return { data, error };
+}
+await supabase
+  .from("users")
+  .update({ is_pro: true })
+  .eq("email", userEmail);

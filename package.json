@@ -1,8 +1,7 @@
-{{
+{
   "name": "animaldetox-gemini",
   "version": "1.0.0",
-  "license": "MIT"
-  "description": "Animal Detox avec Gemini",
+  "description": "Animal Detox Gemini",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"

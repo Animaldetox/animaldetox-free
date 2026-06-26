@@ -1,16 +1,50 @@
+const express = require("express");
+const cors = require("cors");
+const multer = require("multer");
+const fs = require("fs");
+const { GoogleGenAI } = require("@google/genai");
+
+const app = express();
+
+app.use(cors());
+app.use(express.json());
+
+const upload = multer({ dest: "uploads/" });
+
+// 🔐 Gemini setup
+const ai = new GoogleGenAI({
+  apiKey: process.env.GEMINI_API_KEY,
+});
+
+// 🟢 Test serveur
+app.get("/", (req, res) => {
+  res.send("🐾 Animal Detox Gemini OK");
+});
+
+// 🧪 Test API simple
+app.get("/test", (req, res) => {
+  res.json({ ok: true });
+});
+
+// 🧠 ANALYSE IMAGE
 app.post("/analyze", upload.single("image"), async (req, res) => {
   try {
 
     if (!req.file) {
       return res.status(400).json({
-        error: "No image"
+        object: "no_file",
+        risk: "UNKNOWN",
+        explanation: "Aucune image reçue",
+        action: "Envoyer une image"
       });
     }
 
+    // 📸 image en base64
     const imageBase64 = fs.readFileSync(req.file.path, {
       encoding: "base64"
     });
 
+    // 🧠 appel Gemini
     const response = await ai.models.generateContent({
       model: "gemini-2.5-flash",
       contents: [
@@ -22,21 +56,21 @@ app.post("/analyze", upload.single("image"), async (req, res) => {
         },
         {
           text: `
-Tu es un assistant vétérinaire.
+Tu es un vétérinaire expert.
 
 Analyse cette image et réponds UNIQUEMENT en JSON valide :
 
 {
-"object": "nom de l'objet détecté",
-"risk": "LOW | MEDIUM | HIGH | CRITICAL",
-"explanation": "explication simple pour un propriétaire de chien ou chat",
-"action": "conseil clair"
+  "object": "nom de l'objet",
+  "risk": "LOW | MEDIUM | HIGH | CRITICAL",
+  "explanation": "explication simple pour chien/chat",
+  "action": "conseil clair"
 }
 
 Règles :
 - Si toxique pour chien/chat → HIGH ou CRITICAL
 - Sinon → LOW
-- Réponse uniquement JSON, sans texte autour
+- Répond uniquement en JSON sans texte autour
 `
         }
       ]
@@ -51,21 +85,31 @@ Règles :
     try {
       json = JSON.parse(text);
     } catch (e) {
-      json = {
+      return res.json({
         object: "unknown",
         risk: "UNKNOWN",
         explanation: text,
         action: "format error"
-      };
+      });
     }
 
     res.json(json);
 
   } catch (err) {
-    console.log(err);
+    console.log("❌ ERROR:", err);
 
     res.status(500).json({
-      error: err.message
+      object: "server_error",
+      risk: "UNKNOWN",
+      explanation: err.message,
+      action: "check logs"
     });
   }
+});
+
+// 🚀 START SERVER
+const PORT = process.env.PORT || 3000;
+
+app.listen(PORT, () => {
+  console.log("🚀 Server running on port", PORT);
 });

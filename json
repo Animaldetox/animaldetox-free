@@ -1,0 +1,16 @@
+{
+  "name": "animaldetox-free",
+  "version": "1.0.0",
+  "description": "Animal Detox gratuit",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "@tensorflow-models/mobilenet": "^2.1.1",
+    "@tensorflow/tfjs-node": "^4.22.0",
+    "cors": "^2.8.5",
+    "express": "^4.19.2",
+    "multer": "1.4.4"
+  }
+}
